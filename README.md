@@ -1,5 +1,6 @@
 # bkc-dip-mqtt [![NPM version][npm-image]][npm-url] [![Build Status][travis-image]][travis-url] [![Dependency Status][daviddm-image]][daviddm-url] [![Coverage percentage][coveralls-image]][coveralls-url]
 > MQTT bridge for the BKC-DIP protocol
+Control B&K devices connected via ethernet through MQTT.  BKC-DIP is a control protocol for audio/visual devices manufactured by the now defunct B&K Components company.  This library will interrogate the features of the device and establish topics that can be used to control and query the state of the device.
 
 ## Installation
 
@@ -14,6 +15,12 @@ var bkcDipMqtt = require('bkc-dip-mqtt');
 
 bkcDipMqtt('Rainbow');
 ```
+### Supported devices
+
+### Information topics
+
+### Control topics
+
 ## License
 
 Apache-2.0 © [ajweave]()
