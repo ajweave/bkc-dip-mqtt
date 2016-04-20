@@ -17,9 +17,10 @@ bkcDipMqtt('Rainbow');
 ```
 ### Supported devices
 
-### Information topics
+### Topics
 
-### Control topics
+<device_id>/zones/<zone_id>/get
+<device_id>/zones/<zone_id>/set
 
 ## License
 
