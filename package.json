@@ -1,6 +1,6 @@
 {
   "name": "bkc-dip-mqtt",
-  "version": "0.0.0",
+  "version": "1.1.0",
   "description": "MQTT bridge for the BKC-DIP protocol",
   "homepage": "",
   "author": {
@@ -20,7 +20,7 @@
     "audio"
   ],
   "devDependencies": {
-    "eslint": "^2.1.0",
+    "eslint": "^2.4.0",
     "eslint-config-xo-space": "^0.10.0",
     "babel-eslint": "^4.1.8",
     "eslint-plugin-babel": "^3.1.0",
@@ -47,7 +47,7 @@
   "repository": "ajweave/bkc-dip-mqtt",
   "scripts": {
     "prepublish": "gulp prepublish",
-    "test": "gulp"
+    "test": "mocha"
   },
   "license": "Apache-2.0",
   "dependencies": {

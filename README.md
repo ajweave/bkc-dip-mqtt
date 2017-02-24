@@ -22,6 +22,11 @@ bkcDipMqtt('Rainbow');
 <device_id>/zones/<zone_id>/get
 <device_id>/zones/<zone_id>/set
 
+## Running tests
+```sh
+$ npm test
+```
+
 ## License
 
 Apache-2.0 © [ajweave]()
