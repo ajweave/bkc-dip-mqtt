@@ -1,0 +1,25 @@
+#!/usr/bin/env node
+
+var program = require('commander');
+var server = require('../lib/server');
+
+program
+  .version('0.0.1')
+  .option('-b, --broker <url>', 'MQTT broker and port')
+  .option('-h, --host <hostname>', 'BKC ethernet device hostname')
+  .option('-d, --device <devicename>', 'BKC serial device name')
+  .parse(process.argv);
+
+console.log("broker is", program.broker);
+console.log("host is", program.host);
+console.log("device is", program.device);
+
+//TODO Separate MQTT & BKC-DIP.
+if (program.host) {
+    server.start("net", program.broker, program.host);
+}
+
+if (program.device) {
+    server.start("serial", program.broker, program.device);
+}
+
