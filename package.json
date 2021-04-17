@@ -53,7 +53,7 @@
     "commander": "^2.9.0",
     "mqtt": "^1.10.0",
     "prototypes": "^1.4.0",
-    "serialport": "^6.1.1",
+    "serialport": "^3.1.2",
     "telnetit": "0.0.1"
   }
 }
