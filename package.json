@@ -51,6 +51,7 @@
   "license": "Apache-2.0",
   "dependencies": {
     "commander": "^2.9.0",
+    "mocha": "^11.7.6",
     "mqtt": "^1.10.0",
     "prototypes": "^1.4.0",
     "serialport": "^9.0.7",
