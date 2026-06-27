@@ -19,6 +19,44 @@ describe('bkc-dip-mqtt', function () {
         });
       })
     })
+
+    describe('#getLoudness()', function() {
+      it('should return "off" when EQUALIZATION is 0x00', function() {
+        p.data[PresetParameters.EQUALIZATION] = '00';
+        assert.equal(p.getLoudness(), 'off');
+      });
+      it('should return "on" when EQUALIZATION is 0x01', function() {
+        p.data[PresetParameters.EQUALIZATION] = '01';
+        assert.equal(p.getLoudness(), 'on');
+      });
+      it('should return "auto" when EQUALIZATION is 0x02', function() {
+        p.data[PresetParameters.EQUALIZATION] = '02';
+        assert.equal(p.getLoudness(), 'auto');
+      });
+    });
+
+    describe('#setLoudness()', function() {
+      var sentParam, sentValue;
+      before(function() {
+        p.setPresetParameter = function(param, value) {
+          sentParam = param;
+          sentValue = value;
+        };
+      });
+      it('should send "0" for off', function() {
+        p.setLoudness('off');
+        assert.equal(sentValue, '0');
+        assert.equal(sentParam, PresetParameters.EQUALIZATION);
+      });
+      it('should send "1" for on', function() {
+        p.setLoudness('on');
+        assert.equal(sentValue, '1');
+      });
+      it('should send "2" for auto', function() {
+        p.setLoudness('auto');
+        assert.equal(sentValue, '2');
+      });
+    });
   });
 
 
