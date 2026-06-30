@@ -1,6 +1,6 @@
 //import assert from 'assert';
 var bkcDipMqtt = require('../lib/server.js');
-var PresetParameters = global.PresetParameters;
+var PresetParameters = require('../lib/preset_parameters.js');
 var p = new PresetParameters('x');
 var DIP = require('../lib/bkc-dip.js');
 var assert = require('assert');

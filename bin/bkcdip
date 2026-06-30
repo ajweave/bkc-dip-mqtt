@@ -1,25 +1,46 @@
 #!/usr/bin/env node
+"use strict";
 
 var program = require('commander');
 var server = require('../lib/server');
 
 program
-  .version('0.0.1')
-  .option('-b, --broker <url>', 'MQTT broker and port')
-  .option('-h, --host <hostname>', 'BKC ethernet device hostname')
-  .option('-d, --device <devicename>', 'BKC serial device name')
+  .version('1.1.0')
+  .option('-b, --broker <url>', 'MQTT broker URL (e.g. mqtt://localhost:1883)')
+  .option('-h, --host <hostname>', 'BKC ethernet device hostname or IP')
+  .option('-d, --device <devicename>', 'BKC serial device path (e.g. /dev/ttyUSB0)')
   .parse(process.argv);
 
-console.log("broker is", program.broker);
-console.log("host is", program.host);
-console.log("device is", program.device);
+if (!program.broker) {
+  console.error('Error: --broker is required');
+  program.outputHelp();
+  process.exit(1);
+}
 
-//TODO Separate MQTT & BKC-DIP.
+if (!program.host && !program.device) {
+  console.error('Error: at least one of --host or --device is required');
+  program.outputHelp();
+  process.exit(1);
+}
+
+console.log('Broker:', program.broker);
+if (program.host) console.log('Host:', program.host);
+if (program.device) console.log('Device:', program.device);
+
+// Graceful shutdown
+function shutdown(signal) {
+  console.log('\nReceived ' + signal + ', shutting down...');
+  process.exit(0);
+}
+
+process.on('SIGINT', function() { shutdown('SIGINT'); });
+process.on('SIGTERM', function() { shutdown('SIGTERM'); });
+
+// Start the appropriate driver
 if (program.host) {
-    server.start("net", program.broker, program.host);
+  server.start('net', program.broker, program.host);
 }
 
 if (program.device) {
-    server.start("serial", program.broker, program.device);
+  server.start('serial', program.broker, program.device);
 }
-

@@ -19,42 +19,27 @@
     "audio"
   ],
   "devDependencies": {
-    "babel-core": "^5.5.0",
-    "babel-eslint": "^4.1.8",
-    "del": "^2.0.2",
-    "eslint": "^2.4.0",
-    "eslint-config-xo-space": "^0.10.0",
-    "eslint-plugin-babel": "^3.1.0",
-    "gulp": "^3.9.0",
-    "gulp-babel": "^5.1.0",
-    "gulp-coveralls": "^0.1.0",
-    "gulp-eslint": "^2.0.0",
-    "gulp-exclude-gitignore": "^1.0.0",
-    "gulp-istanbul": "^0.10.3",
-    "gulp-line-ending-corrector": "^1.0.1",
-    "gulp-mocha": "^2.0.0",
-    "gulp-nsp": "^2.1.0",
-    "gulp-plumber": "^1.0.0",
-    "isparta": "^3.0.3"
-  },
-  "eslintConfig": {
-    "extends": "xo-space/esnext",
-    "env": {
-      "mocha": true
-    }
+    "@babel/core": "^7.24.0",
+    "@babel/cli": "^7.24.0",
+    "@babel/preset-env": "^7.24.0",
+    "eslint": "^9.0.0",
+    "mocha": "^11.0.0"
   },
   "repository": "ajweave/bkc-dip-mqtt",
   "scripts": {
-    "prepublish": "gulp prepublish",
-    "test": "mocha"
+    "build": "babel lib -d dist",
+    "lint": "eslint lib bin/bkcdip",
+    "test": "mocha",
+    "prepare": "npm run build"
   },
-  "license": "Apache-2.0",
+  "license": "apache-2.0",
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "dependencies": {
-    "commander": "^2.9.0",
-    "mocha": "^11.7.6",
-    "mqtt": "^1.10.0",
-    "prototypes": "^1.4.0",
-    "serialport": "^9.0.7",
-    "telnetit": "0.0.1"
+    "commander": "^13.0.0",
+    "mqtt": "^5.10.0",
+    "serialize-javascript": "^7.0.6",
+    "serialport": "^13.0.0"
   }
 }
