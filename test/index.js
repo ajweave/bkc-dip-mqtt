@@ -91,6 +91,28 @@ describe('bkc-dip-mqtt', function () {
       })
     })
 
+    describe('preset S command format (BKC-DIP spec: S,Pz=nn,id=value)', function() {
+      var sent;
+      var pp;
+      beforeEach(function() {
+        sent = [];
+        var driver = { send: function(receiveId, cmd) { sent.push(cmd); } };
+        pp = new PresetParameters('0', '10', driver, null);
+      });
+      it('setInput uses Pz=FF with equals separator', function() {
+        pp.setInput('06');
+        assert.equal(sent[0], 'S,P10=FF,02=06');
+      });
+      it('setVolumeDb uses Pz=FF with equals separator', function() {
+        pp.setVolumeDb('-32');
+        assert.equal(sent[0], 'S,P10=FF,01=18');
+      });
+      it('setPresetParameter uses Pz=FF with equals separator', function() {
+        pp.setPresetParameter('05', '0C');
+        assert.equal(sent[0], 'S,P10=FF,05=0C');
+      });
+    })
+
     describe('#getLoudness()', function() {
       it('should return "off" when EQUALIZATION is 0x00', function() {
         p.data[PresetParameters.EQUALIZATION] = '00';
