@@ -35,7 +35,7 @@ describe('bkc-dip-mqtt', function () {
       // Source (runtime string): 00=\"Zone \\\"A, B\\\"\",01=02
       // The tokenizer treats \\\" as an escaped quote (literal \" in output).
       // The backslash is consumed as an escape character.
-      var input = '00=\"Zone \\\\\"A, B\\\\\"\",01=02';
+      var input = '00=\"Zone \\\"A, B\\\"\",01=02';
       var result = bkcDipMqtt.splitRespectingQuotes(input, ',');
       assert.equal(result[0], '00=\"Zone \"A, B\"\"');
       assert.equal(result[1], '01=02');
