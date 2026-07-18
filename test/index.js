@@ -83,12 +83,35 @@ describe('bkc-dip-mqtt', function () {
 
   describe('PresetParameters', function() {
     describe('#dbVolumeToBk()', function() {
-      it('should convert db to hex', function() {
-        var data = [{db: '-1', bk: '27'}, {db: '-2', bk: '27'}, {db: '-49', bk: 'F'}, {db: '-80', bk: '0'}];
+      it('should convert db to hex (nearest 2 dB step)', function() {
+        // scale(db) = (db+80)/2, encoded 0x00..0x28 for -80..0 dB
+        var data = [{db: '0', bk: '28'}, {db: '-2', bk: '27'}, {db: '-32', bk: '18'}, {db: '-80', bk: '0'}];
         data.forEach(d => {
           assert.equal(p.dbVolumeToBk(d.db, d.bk), d.bk);
         });
       })
+    })
+
+    describe('volume percent <-> dB boundary conversion', function() {
+      it('maps 0% to -80 dB, 100% to 0 dB, 50% to -40 dB', function() {
+        assert.equal(p.percentToDb(0), -80);
+        assert.equal(p.percentToDb(100), 0);
+        assert.equal(p.percentToDb(50), -40);
+      });
+      it('snaps percent to the 2 dB grid', function() {
+        // 99% -> -0.8 dB -> nearest 2 dB step is 0 dB
+        assert.equal(p.percentToDb(99), 0);
+        // 96% -> -3.2 dB -> nearest 2 dB step is -4 dB
+        assert.equal(p.percentToDb(96), -4);
+        // 1% -> -79.2 dB -> nearest 2 dB step is -80 dB
+        assert.equal(p.percentToDb(1), -80);
+      });
+      it('dbToPercent inverts percentToDb', function() {
+        [0, 25, 50, 75, 100].forEach(function(pct) {
+          var db = p.percentToDb(pct);
+          assert.equal(p.dbToPercent(db), pct);
+        });
+      });
     })
 
     describe('preset S command format (BKC-DIP spec: S,Pz=nn,id=value)', function() {
@@ -169,29 +192,33 @@ describe('bkc-dip-mqtt', function () {
         assert.equal(zp.getRoomEqBassGain('A'), null);
       });
       it('should return correct dB value', function() {
-        zp.data['70'] = '0C'; // 12 + 12 = 24 -> 0dB
+        zp.data['00'] = '18'; // 0x18 -> 0dB
         assert.equal(zp.getRoomEqBassGain('A'), '0');
-        zp.data['70'] = '18'; // 24 + 12 = 36 -> 12dB
+        zp.data['00'] = '30'; // 0x30 -> +12dB
         assert.equal(zp.getRoomEqBassGain('A'), '12');
+        zp.data['00'] = '00'; // 0x00 -> -12dB
+        assert.equal(zp.getRoomEqBassGain('A'), '-12');
+        zp.data['00'] = '19'; // 0x19 -> +0.5dB (0.5 dB step)
+        assert.equal(zp.getRoomEqBassGain('A'), '0.5');
       });
     });
 
     describe('#setRoomEqBassGain()', function() {
       it('should send correct command for 0dB', function() {
         zp.setRoomEqBassGain('A', 0);
-        assert.equal(sentCommand.command, 'S,H,70=0C');
+        assert.equal(sentCommand.command, 'S,H,00=18');
       });
       it('should send correct command for 12dB', function() {
         zp.setRoomEqBassGain('A', 12);
-        assert.equal(sentCommand.command, 'S,H,70=18');
+        assert.equal(sentCommand.command, 'S,H,00=30');
       });
       it('should clamp negative values to -12dB', function() {
         zp.setRoomEqBassGain('A', -15);
-        assert.equal(sentCommand.command, 'S,H,70=00');
+        assert.equal(sentCommand.command, 'S,H,00=00');
       });
       it('should clamp positive values to +12dB', function() {
         zp.setRoomEqBassGain('A', 15);
-        assert.equal(sentCommand.command, 'S,H,70=18');
+        assert.equal(sentCommand.command, 'S,H,00=30');
       });
     });
 
@@ -200,7 +227,7 @@ describe('bkc-dip-mqtt', function () {
         assert.equal(zp.getRoomEqTrebleGain('A'), null);
       });
       it('should return correct dB value', function() {
-        zp.data['72'] = '0C'; // 12 + 12 = 24 -> 0dB
+        zp.data['0C'] = '18'; // 0x18 -> 0dB
         assert.equal(zp.getRoomEqTrebleGain('A'), '0');
       });
     });
@@ -208,13 +235,13 @@ describe('bkc-dip-mqtt', function () {
     describe('#setRoomEqTrebleGain()', function() {
       it('should send correct command for 0dB', function() {
         zp.setRoomEqTrebleGain('A', 0);
-        assert.equal(sentCommand.command, 'S,H,72=0C');
+        assert.equal(sentCommand.command, 'S,H,0C=18');
       });
     });
 
     describe('#getNotch1Gain()', function() {
       it('should return correct dB value', function() {
-        zp.data['6C'] = '0C'; // 12 + 12 = 24 -> 0dB
+        zp.data['18'] = '25'; // 0x25 -> 0dB (Note 4)
         assert.equal(zp.getNotch1Gain('A'), '0');
       });
     });
@@ -222,13 +249,13 @@ describe('bkc-dip-mqtt', function () {
     describe('#setNotch1Gain()', function() {
       it('should send correct command for 0dB', function() {
         zp.setNotch1Gain('A', 0);
-        assert.equal(sentCommand.command, 'S,H,6C=0C');
+        assert.equal(sentCommand.command, 'S,H,18=25');
       });
     });
 
     describe('#getNotch2Gain()', function() {
       it('should return correct dB value for zone A', function() {
-        zp.data['74'] = '0C';
+        zp.data['2A'] = '25';
         assert.equal(zp.getNotch2Gain('A'), '0');
       });
     });
@@ -236,13 +263,13 @@ describe('bkc-dip-mqtt', function () {
     describe('#setNotch2Gain()', function() {
       it('should send correct command for zone A', function() {
         zp.setNotch2Gain('A', 0);
-        assert.equal(sentCommand.command, 'S,H,74=0C');
+        assert.equal(sentCommand.command, 'S,H,2A=25');
       });
     });
 
     describe('#getNotch3Gain()', function() {
       it('should return correct dB value for zone A', function() {
-        zp.data['7F'] = '0C';
+        zp.data['3C'] = '25';
         assert.equal(zp.getNotch3Gain('A'), '0');
       });
     });
@@ -250,35 +277,30 @@ describe('bkc-dip-mqtt', function () {
     describe('#setNotch3Gain()', function() {
       it('should send correct command for zone A', function() {
         zp.setNotch3Gain('A', 0);
-        assert.equal(sentCommand.command, 'S,H,7F=0C');
+        assert.equal(sentCommand.command, 'S,H,3C=25');
       });
     });
 
     describe('Zone parameter ID calculation', function() {
       it('should calculate correct hex IDs for different zones', function() {
-        // Zone A: 0x70
+        // Room EQ Bass Gain zone stride is 0x01 (A=00 .. F=05)
         zp.setRoomEqBassGain('A', 0);
-        assert.equal(sentCommand.command, 'S,H,70=0C');
+        assert.equal(sentCommand.command, 'S,H,00=18');
 
-        // Zone B: 0x71
         zp.setRoomEqBassGain('B', 0);
-        assert.equal(sentCommand.command, 'S,H,71=0C');
+        assert.equal(sentCommand.command, 'S,H,01=18');
 
-        // Zone C: 0x72
         zp.setRoomEqBassGain('C', 0);
-        assert.equal(sentCommand.command, 'S,H,72=0C');
+        assert.equal(sentCommand.command, 'S,H,02=18');
 
-        // Zone D: 0x73
         zp.setRoomEqBassGain('D', 0);
-        assert.equal(sentCommand.command, 'S,H,73=0C');
+        assert.equal(sentCommand.command, 'S,H,03=18');
 
-        // Zone E: 0x74
         zp.setRoomEqBassGain('E', 0);
-        assert.equal(sentCommand.command, 'S,H,74=0C');
+        assert.equal(sentCommand.command, 'S,H,04=18');
 
-        // Zone F: 0x75
         zp.setRoomEqBassGain('F', 0);
-        assert.equal(sentCommand.command, 'S,H,75=0C');
+        assert.equal(sentCommand.command, 'S,H,05=18');
       });
     });
   });

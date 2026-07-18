@@ -1,252 +1,187 @@
-# System Settings Implementation Plan
+# Consolidated TODO — bkc-dip-mqtt spec conformance & HA correctness
 
-## Overview
-Implement all BKC-DIP system parameters as Home Assistant devices and services.
+Merged from `code_review.hy3.md` and `code_review.laguna-xs-2.1.md`. Every item was
+verified against the current `master` source. Requirement being satisfied:
+**every Home Assistant entity must reflect the unit's current value AND be
+controllable from HA.**
 
-## Current State
-- Input titles (01-0F) - Partially implemented
-- Volume levels (20-2F) - Implemented for presets
-- Video sources (30-3F) - Partially implemented
+Verification specs: `CT_600X_20005.pdf` (Appendix A Preset p.7, B System p.9-13,
+E Unit p.24, R Zone Adjustment p.57-59) and `BKC_DIP_20010.pdf` (frame/command
+format p.25-32).
 
-## Missing System Settings (from Appendix B)
+Severity: CRITICAL = corrupts on-wire commands or leaves HA entities
+non-functional; HIGH = wrong value shown / broken control path; MEDIUM = spec
+deviation, dead/wrong code, missing query; LOW = cosmetic / best practice.
 
-### 1. Tuner Settings (40-44)
-| ID | Name | Description | HA Entity |
-|----|------|-------------|-----------|
-| 40 | AM Frequency (10kHz) | AM frequency, USA step | `sensor.zone.am_frequency` |
-| 41 | AM Frequency (9kHz) | AM frequency, international | `sensor.zone.am_frequency_9khz` |
-| 42 | FM Frequency (200kHz) | FM frequency, USA step | `sensor.zone.fm_frequency` |
-| 43 | FM Frequency (100kHz) | FM frequency, international | `sensor.zone.fm_frequency_100khz` |
-| 44 | FM Mode | 0=Mono, 1=Stereo | `select.zone.fm_mode` |
+Convention decision (from user): **Volume is handled internally in dB (-80..0,
+2 dB steps) per spec; Home Assistant exposes 0-100%. The bridge converts at the
+boundary in both directions.**
 
-### 2. Tuner Level Settings (50-5B)
-| ID | Name | Description | HA Entity |
-|----|------|-------------|-----------|
-| 50-55 | Tuner Level | Zone A-F tuner level | `number.zone.tuner_level` |
-| 56-5B | Tuner Max Level | Zone A-F tuner max level | `number.zone.tuner_max_level` |
+---
 
-### 3. Tuner Assignment (60-65)
-| ID | Name | Description | HA Entity |
-|----|------|-------------|-----------|
-| 60-65 | Tuner Assignment | Zone A-F tuner assignment | `select.zone.tuner_assignment` |
+## CRITICAL
 
-### 4. Mode Settings (66-6B)
-| ID | Name | Description | HA Entity |
-|----|------|-------------|-----------|
-| 66-6B | Mode | Zone A-F mode settings | `select.zone.mode` |
+### C-1. Source/Input IDs do not follow Appendix A Note 3
+- Current: `SystemSettings.getInputs()` (system_settings.js:30-60) prepends
+  FM=`00`/AM=`01` then loops `i=1..16` assigning `format2(i)` — so Input1=`01`
+  (collides with AM), no `Dedicated`, phantom inputs 10-16, and every label is
+  shifted. `server.js:96-104` "IN N" fallback maps `IN N -> format2(N)`.
+- Why wrong: Note 3 (p.7) is `0=FM,1=AM,2=Dedicated,3=In1,4=In2,5=In3,6=In4,
+  7=In5,8=In6,9=In7,A=In8,B=In9`. Only 12 sources exist. `id 01` is duplicated;
+  `IN 7` currently selects In5.
+- Fix: Replace loop with the fixed Note-3 12-entry list as the single source of
+  truth for both discovery options and title->id lookup. Fix "IN N" fallback to
+  `format2((N+2))` (In1->03 .. In9->0B). Keep FM/AM at 00/01. Drop the "Zone X
+  IN Dedicated" generation. `PresetParameters.SOURCE_INPUT='02'` (parameter id)
+  is already correct.
 
-### 5. Page/Event Selection (6C-71)
-| ID | Name | Description | HA Entity |
-|----|------|-------------|-----------|
-| 6C-71 | Page/Event | Zone A-F page/event selection | `select.zone.page_event` |
+### C-2. Appendix R (Zone Adjustment) parameter IDs are wrong
+- Current: `zone_adjustment_parameters.js` uses base `0x70` for Room EQ
+  (`0x70+zoneNum` .. `0x73+zoneNum`) and `0x6C + zoneNum*0x13` / `0x74` / `0x7F`
+  for Notch 1/2/3. These land in the Appendix B System range, not Appendix R.
+- Why wrong: Appendix R (p.57-58) is contiguous from `00`. Zone A: Bass Gain
+  `00`, Bass Freq `06`, Treble Gain `0C`, Treble Freq `12`, Notch1 Gain `18`,
+  Notch1 Freq `1E`, Notch1 Width `24`, Notch2 Gain `2A`, Notch3 Gain `3C`,
+  Notch3 Width `4D`. Zone stride = `0x06` for Room EQ family; notch gain zone
+  stride = `1` (`18,19,1A,1B,1C,1D`). Layout:
+  ```
+  Room EQ Bass Gain   00..05   Bass Freq   06..0B
+  Room EQ Treble Gain 0C..11   Treble Freq 12..17
+  Notch1 Gain 18..1D  Freq 1E..23  Width 24..29
+  Notch2 Gain 2A..2F  Freq 30..35  Width 36..3B
+  Notch3 Gain 3C..41  Freq 42..47  Width 48..4D
+  ```
+- Fix: Recompute every id from the table above. Notch N gain base =
+  `0x18 + (N-1)*0x12`; freq = gain+6; width = gain+12; then `+zoneNum` per zone.
 
-### 6. Level Controls (72-83)
-| ID | Name | Description | HA Entity |
-|----|------|-------------|-----------|
-| 72-83 | Left/Right Level | Zone A-F left/right level control | `number.zone.left_level`, `number.zone.right_level` |
+### C-3. Appendix R value encodings are wrong
+- Current (zone_adjustment_parameters.js): Room EQ gain `num-12` / clamp `0x18`;
+  Bass Freq `num*100+20`; Treble Freq `num*1000+2000` / set clamp `0x18`; Notch
+  gain `num-12` / clamp `0x19`; Notch freq `num*100+20` / clamp `0x8C`.
+- Why wrong (Appendix R Notes p.59):
+  - Note 1 Room EQ Gain: `0=-12 .. 18h=0 .. 30h=+12`, 0.5 dB step. Decode
+    `hex-0x18` (in half-dB: `(hex-0x18)/2`); encode clamp `0..0x30`.
+  - Note 2 Bass Freq: `0=20Hz`, step 5, `38h=300Hz`. Decode `20+num*5`.
+  - Note 3 Treble Freq: `0=2.0kHz`, step 0.1kHz, `8Ch=16.0kHz`. Decode
+    `2000+num*100` (Hz); encode clamp `0..0x8C`.
+  - Note 4 Notch Gain: `1h=-18 .. 25h=0`. Decode `hex-0x25`; clamp `0..0x25`.
+  - Note 5 Notch Freq: `0=20Hz`, step 2, `8Ch=300Hz`. Decode `20+num*2`.
+  - Note 6 Notch Width: 0-6 Q-index (opaque; document it).
+- Fix: Apply the offsets/steps above in getters and setters.
 
-### 7. Max Level Controls (84-95)
-| ID | Name | Description | HA Entity |
-|----|------|-------------|-----------|
-| 84-95 | Left/Right Max | Zone A-F left/right max level | `number.zone.left_max`, `number.zone.right_max` |
+### C-4. Most declared HA entities are never published and have no command handler
+- Current: `home_assistant.js` declares ~25 entities/zone + 3 system, but
+  `server.js` message handler (60-136) only dispatches input/volume/power-state/
+  bass/treble/loudness; `publishZonePreset` (233-245) only publishes those;
+  `discover()` (201-210) sends only `G,F4`,`G,S` (no `G,H`). `ZoneAdjParameters`
+  is required (16) but never instantiated. `system` pseudo-zone has no backing.
+- Why wrong: state_topic never published -> HA "unknown"; command_topic never
+  subscribed -> not controllable. ~20 of ~25 entities are dead.
+- Fix: (1) `discover()` sends `G,H` after `G,S`. (2) `onReceive` handles
+  `R`/`U` with spec starting `H`: build/keep a `ZoneAdjParameters` per zone,
+  `process(parts)`, publish each room-eq/notch `/get`. (3) Extend message
+  handler to dispatch room-eq/*, notch/*, tuner/*, left-level, right-level,
+  *-max-level (and system) to the setters, then re-read. (4) Wire or drop the
+  system pseudo-zone (flasher/rs-232/name).
 
-### 8. Control Outputs (96-A7)
-| ID | Name | Description | HA Entity |
-|----|------|-------------|-----------|
-| 96-9B | Control Out | Zone A-F control out selection | `select.zone.control_out` |
-| 9C-A1 | Control Out Selected | Zone A-F control out selected | `sensor.zone.control_out_selected` |
-| A2-A7 | Common Control 1 | Common control 1 out select | `select.common_control_1` |
-| A8-AD | Common Control 2 | Common control 2 out select | `select.common_control_2` |
+### C-5. `system_settings.js` Room EQ / Notch methods duplicate & corrupt data
+- Current: system_settings.js:71-282 defines get/setRoomEq* and get/setNotch*
+  with bases `0x00..0x03+zoneNum` and `0x6C+zoneNum*0x13`. Never called (live
+  path is zone_adjustment_parameters.js) but `0x00+zoneNum` is Appendix B
+  "Input N Title".
+- Why wrong: Room EQ/Notch belong in Appendix R only; these would corrupt input
+  titles if ever wired.
+- Fix: Delete get/setRoomEq* and get/setNotch* from system_settings.js. Keep
+  Room EQ/Notch only in the corrected zone_adjustment_parameters.js.
 
-### 9. Code Set IDs (AE-BF)
-| ID | Name | Description | HA Entity |
-|----|------|-------------|-----------|
-| AE-BF | Group Code Set | Group a-z code set IDs | `sensor.group_code_set` |
+---
 
-### 10. Rear Remote Inputs (C0-C5)
-| ID | Name | Description | HA Entity |
-|----|------|-------------|-----------|
-| C0-C5 | Rear Remote | Zone A-F rear remote setting | `select.zone.rear_remote` |
+## HIGH
 
-### 11. Other Settings (CA-CB, CC-CF, D0-D5)
-| ID | Name | Description | HA Entity |
-|----|------|-------------|-----------|
-| CA | Flasher Out | Flasher output setting | `switch.flascher_out` |
-| CB | RS-232 Control Out | RS-232 control output | `select.rs232_control` |
-| CC-CF | Page/Event Actions | Page/event actions | `switch.page_event_action` |
-| D0-D5 | System Settings | Various system settings | `sensor.system_settings` |
+### H-1. Volume: internal dB vs HA percent (convert at boundary)
+- Current: HA volume declared `min:0,max:100,step:1,'%'` (home_assistant.js:
+  68-71) but `publishZonePreset` publishes `getVolumeDb()` (dB) and
+  `setVolumeDb` consumes a dB string. Mismatch: dB never in 0-100.
+- Decision: keep internal dB (-80..0, 2 dB steps) per spec; HA uses 0-100%.
+- Fix: Add boundary conversion. Publish `dbToPercent(db)` to `/volume/get`;
+  in the handler convert incoming `%` via `percentToDb(pct)` before
+  `setVolumeDb`. Percent maps linearly onto the 0x00..0x28 (0..40) hex range
+  (equivalently `db = pct/100*80 - 80`, snapped to 2 dB). HA config stays
+  `0-100 %`.
 
-## Appendix R: Zone Adjustment Parameters (From CT_600X_20005.pdf)
+### H-2. `setPowerState` sends a malformed trailing GET
+- Current: preset_parameters.js:27-28 sends `S,Z<zone>,24=<v>` then
+  `G,Z<zone>,24=<v>`.
+- Why wrong: GET form is `G,Z<zone>` with no `24=` suffix; unit ignores it. The
+  `R,Z…,24=` reply after the SET is the real refresh.
+- Fix: Delete the second `driver.send` line.
 
-### Zone A Room EQ Settings (H00-H17)
-| ID | Name | Description | HA Entity |
-|----|------|-------------|-----------|
-| H00 | Room EQ Bass Gain | Zone A Room EQ Bass Gain | `number.zone_a.room_eq_bass_gain` |
-| H01 | Room EQ Bass Frequency | Zone A Room EQ Bass Frequency | `sensor.zone_a.room_eq_bass_freq` |
-| H02 | Room EQ Treble Gain | Zone A Room EQ Treble Gain | `number.zone_a.room_eq_treble_gain` |
-| H03 | Room EQ Treble Frequency | Zone A Room EQ Treble Frequency | `sensor.zone_a.room_eq_treble_freq` |
+### H-3. `getInput()` can publish a raw hex id -> HA "unknown"
+- Current: preset_parameters.js:46-54 returns raw `inputId` when lookup misses;
+  HA `select` state must equal an option (a title).
+- Fix: Resolved by C-1's correct map; also ensure `getInput` only ever returns a
+  title present in the options list.
 
-### Zone B Room EQ Settings (H18-H2F)
-| ID | Name | Description | HA Entity |
-|----|------|-------------|-----------|
-| H18 | Room EQ Bass Gain | Zone B Room EQ Bass Gain | `number.zone_b.room_eq_bass_gain` |
-| H19 | Room EQ Bass Frequency | Zone B Room EQ Bass Frequency | `sensor.zone_b.room_eq_bass_freq` |
-| H1A | Room EQ Treble Gain | Zone B Room EQ Treble Gain | `number.zone_b.room_eq_treble_gain` |
-| H1B | Room EQ Treble Frequency | Zone B Room EQ Treble Frequency | `sensor.zone_b.room_eq_treble_freq` |
+---
 
-### Zone C Room EQ Settings (H20-H37)
-| ID | Name | Description | HA Entity |
-|----|------|-------------|-----------|
-| H20 | Room EQ Bass Gain | Zone C Room EQ Bass Gain | `number.zone_c.room_eq_bass_gain` |
-| H21 | Room EQ Bass Frequency | Zone C Room EQ Bass Frequency | `sensor.zone_c.room_eq_bass_freq` |
-| H22 | Room EQ Treble Gain | Zone C Room EQ Treble Gain | `number.zone_c.room_eq_treble_gain` |
-| H23 | Room EQ Treble Frequency | Zone C Room EQ Treble Frequency | `sensor.zone_c.room_eq_treble_freq` |
+## MEDIUM
 
-### Zone D Room EQ Settings (H24-H3B)
-| ID | Name | Description | HA Entity |
-|----|------|-------------|-----------|
-| H24 | Room EQ Bass Gain | Zone D Room EQ Bass Gain | `number.zone_d.room_eq_bass_gain` |
-| H25 | Room EQ Bass Frequency | Zone D Room EQ Bass Frequency | `sensor.zone_d.room_eq_bass_freq` |
-| H26 | Room EQ Treble Gain | Zone D Room EQ Treble Gain | `number.zone_d.room_eq_treble_gain` |
-| H27 | Room EQ Treble Frequency | Zone D Room EQ Treble Frequency | `sensor.zone_d.room_eq_treble_freq` |
+### M-1. `discover()` never queries Appendix R (`G,H`) or tuner/level params
+- Covered operationally by C-4; tracked separately for the query side.
 
-### Zone E Room EQ Settings (H3C-H53)
-| ID | Name | Description | HA Entity |
-|----|------|-------------|-----------|
-| H3C | Room EQ Bass Gain | Zone E Room EQ Bass Gain | `number.zone_e.room_eq_bass_gain` |
-| H3D | Room EQ Bass Frequency | Zone E Room EQ Bass Frequency | `sensor.zone_e.room_eq_bass_freq` |
-| H3E | Room EQ Treble Gain | Zone E Room EQ Treble Gain | `number.zone_e.room_eq_treble_gain` |
-| H3F | Room EQ Treble Frequency | Zone E Room EQ Treble Frequency | `sensor.zone_e.room_eq_treble_freq` |
+### M-2. Room EQ Gain HA `step` is 1 but spec resolution is 0.5 dB
+- Current: home_assistant.js:124 (and treble/notch gain) `step:1`, range -12..12.
+- Fix: `step: 0.5` on Room EQ / Notch gain numbers (depends on C-3 encoding).
 
-### Zone F Room EQ Settings (H54-H6B)
-| ID | Name | Description | HA Entity |
-|----|------|-------------|-----------|
-| H54 | Room EQ Bass Gain | Zone F Room EQ Bass Gain | `number.zone_f.room_eq_bass_gain` |
-| H55 | Room EQ Bass Frequency | Zone F Room EQ Bass Frequency | `sensor.zone_f.room_eq_bass_freq` |
-| H56 | Room EQ Treble Gain | Zone F Room EQ Treble Gain | `number.zone_f.room_eq_treble_gain` |
-| H57 | Room EQ Treble Frequency | Zone F Room EQ Treble Frequency | `sensor.zone_f.room_eq_treble_freq` |
+### M-3. Checksum validation on received frames is disabled
+- Current: server.js:257-277 extracts but never verifies cs16 (branch commented
+  out). net.js has `//todo bounds check` on the 4096-byte buffer.
+- Fix: Re-enable `DIP.calculateChecksum` verification; reject bad frames; add
+  the bounds check in net.js.
 
-### Zone A Notch Filter Settings (H6C-H7F)
-| ID | Name | Description | HA Entity |
-|----|------|-------------|-----------|
-| H6C | Notch 1 Gain | Zone A Notch 1 Gain | `number.zone_a.notch1_gain` |
-| H6D | Notch 1 Frequency | Zone A Notch 1 Frequency | `sensor.zone_a.notch1_freq` |
-| H6E | Notch 1 Width | Zone A Notch 1 Width | `number.zone_a.notch1_width` |
-| H6F | Notch 2 Gain | Zone A Notch 2 Gain | `number.zone_a.notch2_gain` |
-| H70 | Notch 2 Frequency | Zone A Notch 2 Frequency | `sensor.zone_a.notch2_freq` |
-| H71 | Notch 2 Width | Zone A Notch 2 Width | `number.zone_a.notch2_width` |
-| H72 | Notch 3 Gain | Zone A Notch 3 Gain | `number.zone_a.notch3_gain` |
-| H73 | Notch 3 Frequency | Zone A Notch 3 Frequency | `sensor.zone_a.notch3_freq` |
-| H74 | Notch 3 Width | Zone A Notch 3 Width | `number.zone_a.notch3_width` |
+### M-4. `dbVolumeToBk` snapping is wrong for negative odd dB
+- Current: preset_parameters.js:78 `db = db + (db % 2)` rounds away from zero
+  (-1 -> -2, 1 -> 2) rather than to nearest even.
+- Fix: `db = Math.round(db/2)*2;` (folds into H-1's conversion work).
 
-### Zone B Notch Filter Settings (H75-H87)
-| ID | Name | Description | HA Entity |
-|----|------|-------------|-----------|
-| H75 | Notch 1 Gain | Zone B Notch 1 Gain | `number.zone_b.notch1_gain` |
-| H76 | Notch 1 Frequency | Zone B Notch 1 Frequency | `sensor.zone_b.notch1_freq` |
-| H77 | Notch 1 Width | Zone B Notch 1 Width | `number.zone_b.notch1_width` |
-| H78 | Notch 2 Gain | Zone B Notch 2 Gain | `number.zone_b.notch2_gain` |
-| H79 | Notch 2 Frequency | Zone B Notch 2 Frequency | `sensor.zone_b.notch2_freq` |
-| H7A | Notch 2 Width | Zone B Notch 2 Width | `number.zone_b.notch2_width` |
-| H7B | Notch 3 Gain | Zone B Notch 3 Gain | `number.zone_b.notch3_gain` |
-| H7C | Notch 3 Frequency | Zone B Notch 3 Frequency | `sensor.zone_b.notch3_freq` |
-| H7D | Notch 3 Width | Zone B Notch 3 Width | `number.zone_b.notch3_width` |
+### M-5. Empty stub modules `lib/tuner.js` and `lib/model.js`
+- Current: both 0 bytes; `tuner.js` never required.
+- Fix: Remove (or implement).
 
-### Zone C Notch Filter Settings (H7E-H90)
-| ID | Name | Description | HA Entity |
-|----|------|-------------|-----------|
-| H7E | Notch 1 Gain | Zone C Notch 1 Gain | `number.zone_c.notch1_gain` |
-| H7F | Notch 1 Frequency | Zone C Notch 1 Frequency | `sensor.zone_c.notch1_freq` |
-| H80 | Notch 1 Width | Zone C Notch 1 Width | `number.zone_c.notch1_width` |
-| H81 | Notch 2 Gain | Zone C Notch 2 Gain | `number.zone_c.notch2_gain` |
-| H82 | Notch 2 Frequency | Zone C Notch 2 Frequency | `sensor.zone_c.notch2_freq` |
-| H83 | Notch 2 Width | Zone C Notch 2 Width | `number.zone_c.notch2_width` |
-| H84 | Notch 3 Gain | Zone C Notch 3 Gain | `number.zone_c.notch3_gain` |
-| H85 | Notch 3 Frequency | Zone C Notch 3 Frequency | `sensor.zone_c.notch3_freq` |
-| H86 | Notch 3 Width | Zone C Notch 3 Width | `number.zone_c.notch3_width` |
+### M-6. Missing recommended HA fields
+- `entity_category` (config/diagnostic) and `enabled_by_default` absent on all
+  entities. Best practice for the large entity set.
 
-### Zone D Notch Filter Settings (H87-H99)
-| ID | Name | Description | HA Entity |
-|----|------|-------------|-----------|
-| H87 | Notch 1 Gain | Zone D Notch 1 Gain | `number.zone_d.notch1_gain` |
-| H88 | Notch 1 Frequency | Zone D Notch 1 Frequency | `sensor.zone_d.notch1_freq` |
-| H89 | Notch 1 Width | Zone D Notch 1 Width | `number.zone_d.notch1_width` |
-| H8A | Notch 2 Gain | Zone D Notch 2 Gain | `number.zone_d.notch2_gain` |
-| H8B | Notch 2 Frequency | Zone D Notch 2 Frequency | `sensor.zone_d.notch2_freq` |
-| H8C | Notch 2 Width | Zone D Notch 2 Width | `number.zone_d.notch2_width` |
-| H8D | Notch 3 Gain | Zone D Notch 3 Gain | `number.zone_d.notch3_gain` |
-| H8E | Notch 3 Frequency | Zone D Notch 3 Frequency | `sensor.zone_d.notch3_freq` |
-| H8F | Notch 3 Width | Zone D Notch 3 Width | `number.zone_d.notch3_width` |
+---
 
-### Zone E Notch Filter Settings (H90-H9F)
-| ID | Name | Description | HA Entity |
-|----|------|-------------|-----------|
-| H90 | Notch 1 Gain | Zone E Notch 1 Gain | `number.zone_e.notch1_gain` |
-| H91 | Notch 1 Frequency | Zone E Notch 1 Frequency | `sensor.zone_e.notch1_freq` |
-| H92 | Notch 1 Width | Zone E Notch 1 Width | `number.zone_e.notch1_width` |
-| H93 | Notch 2 Gain | Zone E Notch 2 Gain | `number.zone_e.notch2_gain` |
-| H94 | Notch 2 Frequency | Zone E Notch 2 Frequency | `sensor.zone_e.notch2_freq` |
-| H95 | Notch 2 Width | Zone E Notch 2 Width | `number.zone_e.notch2_width` |
-| H96 | Notch 3 Gain | Zone E Notch 3 Gain | `number.zone_e.notch3_gain` |
-| H97 | Notch 3 Frequency | Zone E Notch 3 Frequency | `sensor.zone_e.notch3_freq` |
-| H98 | Notch 3 Width | Zone E Notch 3 Width | `number.zone_e.notch3_width` |
+## LOW
 
-### Zone F Notch Filter Settings (H99-HAB)
-| ID | Name | Description | HA Entity |
-|----|------|-------------|-----------|
-| H99 | Notch 1 Gain | Zone F Notch 1 Gain | `number.zone_f.notch1_gain` |
-| HA | Notch 1 Frequency | Zone F Notch 1 Frequency | `sensor.zone_f.notch1_freq` |
-| HB | Notch 1 Width | Zone F Notch 1 Width | `number.zone_f.notch1_width` |
-| HC | Notch 2 Gain | Zone F Notch 2 Gain | `number.zone_f.notch2_gain` |
-| HD | Notch 2 Frequency | Zone F Notch 2 Frequency | `sensor.zone_f.notch2_freq` |
-| HE | Notch 2 Width | Zone F Notch 2 Width | `number.zone_f.notch2_width` |
-| HF | Notch 3 Gain | Zone F Notch 3 Gain | `number.zone_f.notch3_gain` |
-| H100 | Notch 3 Frequency | Zone F Notch 3 Frequency | `sensor.zone_f.notch3_freq` |
-| H101 | Notch 3 Width | Zone F Notch 3 Width | `number.zone_f.notch3_width` |
+### L-1. Debug `console.log` left in production paths
+- server.js:28 "Audiophile version!!!!", per-frame logs, every setter logs.
+  Gate behind a debug flag.
 
-## Implementation Steps
+### L-2. Typo `"parameer"` in server.js:135 -> `"parameter"`.
 
-### Step 1: Create System Settings Module
-- [x] Create `lib/system_settings.js` methods for all parameters
-- [x] Add getter/setter methods for each parameter type
-- [x] Add validation for parameter values
+### L-3. 9 kHz AM / 100 kHz FM variants never exposed via HA
+- system_settings.js:315-378 correct vs spec but unwired; only 10 kHz AM /
+  200 kHz FM (USA) surfaced. Confirm region.
 
-### Step 2: Update Home Assistant Integration
-- [x] Add new MQTT topics for system settings
-- [x] Create sensor/number/select entities for each parameter
-- [x] Add commands for setting parameters
+### L-4. Notch Width entity is an opaque 0-6 Q-index
+- No unit / doesn't convey actual Q (21.0..3.0). Document in name or add a
+  mapping sensor.
 
-### Step 3: Add Discovery Support
-- [x] Update HA discovery to include room EQ settings
-- [x] Add discovery for notch filter settings
-- [x] Add discovery for all zone adjustment parameters
+---
 
-### Step 4: Testing
-- [ ] Test each parameter individually
-- [ ] Test bulk updates
-- [ ] Test edge cases and invalid values
+## Implementation order
+1. C-1 (source ids) + H-3
+2. C-2 + C-3 + M-2 (Appendix R ids + encodings + step)
+3. C-5 (delete dead Room EQ/Notch from system_settings.js)
+4. H-1 + M-4 (volume dB<->% conversion)
+5. H-2 (drop bogus GET)
+6. C-4 + M-1 (HA wiring: G,H query, receive handler, command dispatch, system)
+7. M-3 (checksum), M-5 (stubs), M-6 (HA fields)
+8. L-1..L-4 (hygiene)
 
-## Technical Notes
-
-### Parameter Value Ranges
-- **Room EQ Gain**: 0x00-0x18 (-12dB to +12dB, Note 1)
-- **Room EQ Frequency**: 0x00-0x38 (20Hz to 20kHz, Note 2, 3)
-- **Notch Gain**: 0x00-0x19 (-12dB to +12dB, Note 4)
-- **Notch Frequency**: 0x00-0x8C (20Hz to 20kHz, Note 5)
-- **Notch Width**: 0x00-0x06 (Q factor, Note 6)
-
-### Command Format
-- Read: `(R,H,{param};checksum)`
-- Set: `(S,H,{param}={value};checksum)`
-
-### Data Types
-- Hex values: 2-char hex strings (00-FF)
-- Strings: Quoted values ("Title")
-- Booleans: 0/1
-- Enums: Specific hex values
-
-## References
-- CT_600X_20005.pdf Appendix B: System Parameters
-- CT_600X_20005.pdf Appendix A: Preset Parameters
-- CT_600X_20005.pdf Appendix C: Tuner Station Parameters
-- CT_600X_20005.pdf Appendix R: Zone Adjustment Parameters
+Note: tests in `test/index.js` currently lock in the buggy Appendix R ids
+(e.g. asserting `0x70` base). They must be updated to the corrected ids as part
+of C-2/C-3.
